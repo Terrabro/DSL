@@ -1,27 +1,48 @@
 FLOW_ID: "Customer_Service_Bot_Flow"
 INITIAL_STATE: "WELCOME"
 
-# 意图到状态的全局映射 (主要用于意图切换)
+# 意图到状态的全局映射
 INTENT_MAP:
-  Greeting: WELCOME
+  Greeting: MAIN_MENU
   QueryOrder: ORDER_QUERY_START
   ModifyPassword: ACCOUNT_CHANGE_PASSWORD_START
   DeactivateAccount: ACCOUNT_DEACTIVATE_START
   LodgeComplaint: COMPLAINT_START
   QueryProduct: PRODUCT_QUERY_START
   Fallback: FALLBACK_TO_AGENT 
+  
+  Select_1: ACCOUNT_CHANGE_PASSWORD_START
+  Select_2: ACCOUNT_DEACTIVATE_START
+  Select_3: ORDER_QUERY_START
+  Select_4: PRODUCT_QUERY_START
+  Select_5: COMPLAINT_START
 
 STATES:
-  # --- 1. 欢迎和入口 ---
+  # --- 1. 欢迎和主菜单引导 ---
   WELCOME:
-    ENTRY_PROMPT: "您好！我是智能客服。我可以帮您进行**账户操作**、**查询订单/商品**或**投诉**。请问您需要哪项服务？"
+    ENTRY_PROMPT: "您好！我是智能客服。请问您需要什么帮助？"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+          
+  MAIN_MENU:
+    ENTRY_PROMPT: |
+      请选择您需要的服务序号：
+      1. 账户：修改密码
+      2. 账户：注销账户
+      3. 查询：订单查询
+      4. 查询：商品信息
+      5. 投诉：提交投诉
+      (您可以直接输入序号或意图，例如“3”或“订单查询”)
     REQUIRED_SLOTS: []
 
   # --- 2. 订单查询流程 ---
   ORDER_QUERY_START:
     REQUIRED_SLOTS: ["order_id"]
     ACTION_MISSING_SLOT:
-      PROMPT: "请您提供订单号，例如：我的订单号是 20240901。"
+      PROMPT: "好的，请您提供要查询的订单号。"
     ACTION_FULFILLED:
       EXECUTE: "OrderAPI.query"
       TRANSITIONS:
@@ -31,31 +52,81 @@ STATES:
           GOTO: ORDER_QUERY_FAILURE
 
   ORDER_QUERY_SUCCESS:
-    ENTRY_PROMPT: "您的订单 ${order_id} 状态是【${api_result.status}】，预计到达日期是 ${api_result.eta}。"
+    ENTRY_PROMPT: "您的订单 ${order_id} 购买了 ${api_result.product_name}，当前状态是【${api_result.status}】，预计到达日期是 ${api_result.eta}。"
     REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: WELCOME # 成功后返回主菜单
 
   ORDER_QUERY_FAILURE:
-    ENTRY_PROMPT: "抱歉，我们未能查询到订单 ${order_id} 的信息，请您核对订单号是否正确。"
+    ENTRY_PROMPT: "抱歉，未能查询到订单号 ${order_id} 的信息，请您核对订单号是否正确。"
     REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU # 失败后返回主菜单
 
   # --- 3. 修改密码流程 ---
   ACCOUNT_CHANGE_PASSWORD_START:
     REQUIRED_SLOTS: ["account_id", "old_password", "new_password"]
     ACTION_MISSING_SLOT:
-      PROMPT: "请您提供【账户ID】、【旧密码】和【新密码】以完成密码修改。"
+      PROMPT: "请依次提供【账户ID】、【旧密码】和【新密码】以完成密码修改。"
     ACTION_FULFILLED:
       EXECUTE: "AccountAPI.changePassword"
       TRANSITIONS:
         - CONDITION: API_SUCCESS
           GOTO: ACCOUNT_CHANGE_SUCCESS
         - CONDITION: API_FAILURE
-          GOTO: FALLBACK_TO_AGENT
+          GOTO: ACCOUNT_CHANGE_FAILURE # 密码不匹配或账户不存在，转到失败状态
 
   ACCOUNT_CHANGE_SUCCESS:
     ENTRY_PROMPT: "您的账户 ${account_id} 密码已成功修改。请注意保管新密码。"
     REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
 
-  # --- 4. 投诉流程 ---
+  ACCOUNT_CHANGE_FAILURE:
+    ENTRY_PROMPT: "账户或密码验证失败，无法修改密码。请核对信息或转人工。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: FALLBACK_TO_AGENT
+          
+  # --- 4. 注销账户流程 ---
+  ACCOUNT_DEACTIVATE_START:
+    REQUIRED_SLOTS: ["account_id"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "好的，请提供您要注销的账户ID。"
+    ACTION_FULFILLED:
+      EXECUTE: "AccountAPI.deactivate"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: ACCOUNT_DEACTIVATE_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: ACCOUNT_DEACTIVATE_FAILURE
+          
+  ACCOUNT_DEACTIVATE_SUCCESS:
+    ENTRY_PROMPT: "账户 ${account_id} 已成功注销。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  ACCOUNT_DEACTIVATE_FAILURE:
+    ENTRY_PROMPT: "注销账户 ${account_id} 失败，可能该账户不存在。请转人工。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: FALLBACK_TO_AGENT
+
+
+  # --- 5. 投诉流程 ---
   COMPLAINT_START:
     REQUIRED_SLOTS: ["issue_description"]
     ACTION_MISSING_SLOT:
@@ -65,12 +136,47 @@ STATES:
       TRANSITIONS:
         - CONDITION: API_SUCCESS
           GOTO: COMPLAINT_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: FALLBACK_TO_AGENT # 投诉提交失败转人工
 
   COMPLAINT_SUCCESS:
     ENTRY_PROMPT: "我们已收到您的投诉，参考编号是 ${api_result.ref_id}。将尽快为您处理。"
     REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
 
-  # --- 5. 兜底状态 ---
+  # --- 6. 商品查询流程 ---
+  PRODUCT_QUERY_START:
+    REQUIRED_SLOTS: ["product_name"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请您提供您想查询的商品名称。"
+    ACTION_FULFILLED:
+      EXECUTE: "ProductAPI.query"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: PRODUCT_QUERY_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: PRODUCT_QUERY_FAILURE
+          
+  PRODUCT_QUERY_SUCCESS:
+    ENTRY_PROMPT: "您查询的商品【${product_name}】，价格是 ${api_result.price}，当前库存状态为：${api_result.stock}。描述：${api_result.description}"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  PRODUCT_QUERY_FAILURE:
+    ENTRY_PROMPT: "抱歉，我们未能找到与 ${product_name} 相关的商品信息。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  # --- 7. 兜底状态 ---
   FALLBACK_TO_AGENT:
     ENTRY_PROMPT: "抱歉，我暂时无法理解您的请求或处理此业务。正在为您转接人工客服，请稍候..."
     REQUIRED_SLOTS: []
