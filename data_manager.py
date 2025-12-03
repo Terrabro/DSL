@@ -3,10 +3,10 @@ import os
 import time
 from typing import Dict, Any, List, Optional
 
-ACCOUNTS_FILE = "accounts.csv"
-ORDERS_FILE = "orders.csv"
-COMPLAINTS_FILE = "complaints.csv"
-PRODUCTS_FILE = "products.csv"
+ACCOUNTS_FILE = "./data/accounts.csv"
+ORDERS_FILE = "./data/orders.csv"
+COMPLAINTS_FILE = "./data/complaints.csv"
+PRODUCTS_FILE = "./data/products.csv"
 
 class DataManager:
     """

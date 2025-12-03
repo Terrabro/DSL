@@ -237,7 +237,7 @@ def run_cli_bot(interpreter: InterpreterCore):
                  interpreter._display_prompt(interpreter._get_current_state_def().get("ENTRY_PROMPT"))
 
 if __name__ == "__main__":
-    print("--- 智能客服机器人解释器 V2.2 启动 ---")
+    print("--- 智能客服机器人解释器 V2.3 启动 ---")
     try:
         interpreter = InterpreterCore(FLOW_FILE_PATH, NLU_MODEL)
         run_cli_bot(interpreter)
