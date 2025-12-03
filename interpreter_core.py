@@ -1,4 +1,4 @@
-# interpreter_core.py V2.2
+# interpreter_core.py V2.3 (已修复缩进和槽位清空逻辑)
 
 import json
 import time
@@ -105,7 +105,7 @@ class InterpreterCore:
             
         # 2. 替换 API 结果变量 (${api_result.key})
         if 'api_result' in self.context.api_result and self.context.api_result['status'] == 'success':
-             for key, value in self.context.api_result['api_result'].items():
+            for key, value in self.context.api_result['api_result'].items():
                 final_prompt = final_prompt.replace(f"${{api_result.{key}}}", str(value))
                 
         return final_prompt
@@ -126,25 +126,44 @@ class InterpreterCore:
         
         print(f"[NLU 结果]: {nlu_result['intent']} | Slots: {nlu_result['slots']}")
         
-        # 2. 更新槽位
-        self.context.slots_filled.update(nlu_result['slots'])
-        
+        # 2. 更新槽位 (将当前回合识别到的所有槽位先更新进去)
+        self.context.slots_filled.update(nlu_result['slots']) 
+
         # 3. 意图驱动的状态转换
         intent = nlu_result['intent']
         if intent in self.flow_model['INTENT_MAP']:
             new_state = self.flow_model['INTENT_MAP'][intent]
-            if new_state != self.context.current_state or self.context.current_state == "MAIN_MENU":
+            
+            # 只有当发生状态切换时才进行后续操作，防止在同一状态下重复清空
+            # 注意：MAIN_MENU 总是作为新的起点
+            if new_state != self.context.current_state or self.context.current_state == "MAIN_MENU": 
                 print(f"[流程转换]: 意图切换 -> 从 {self.context.current_state} 切换到 {new_state}")
+
+                target_def = self.flow_model['STATES'].get(new_state, {})
+                required_slots_for_new_state = target_def.get("REQUIRED_SLOTS", [])
                 
-                # V2.2 修正：意图切换时立即清理旧流程的槽位
-                self.context.slots_filled = {}
-                self.context.api_result = {}
-                
+                # 检查：当前已填充的槽位是否满足新状态的要求
+                # slots_filled 已经包含了当前回合识别到的槽位
+                slots_are_sufficient = all(slot in self.context.slots_filled for slot in required_slots_for_new_state)
+
+                if not slots_are_sufficient:
+                    # 槽位不足时，清空旧流程的槽位
+                    print("[槽位清理]: 意图切换但槽位不足，清空旧槽位。")
+                    # 意图切换时立即清理旧流程的槽位
+                    self.context.slots_filled = {}
+                else:
+                    # 槽位已满足，保留槽位直接进入执行，解决单轮对话重复提问问题
+                    print("[槽位保留]: 意图切换但槽位已满足，保留槽位直接执行。")
+                    pass 
+
+                self.context.api_result = {} # API 结果通常都需要清空
+
                 self.context.current_state = new_state
-                current_def = self._get_current_state_def()
+                current_def = target_def # 更新 current_def
                 
+                # 再次检查新的状态定义，进行槽位检查和动作执行
                 if current_def.get("REQUIRED_SLOTS") or current_def.get("ACTION_FULFILLED"):
-                    return self._check_slots_and_act(current_def)
+                    return self._check_slots_and_act(current_def) 
                 else:
                     self._display_prompt(current_def.get("ENTRY_PROMPT"))
                     return
@@ -163,8 +182,6 @@ class InterpreterCore:
                 api_response = self._execute_action(action_type, self.context.slots_filled)
                 self.context.api_result = api_response
                 
-                # V2.2 修正 Bug 2: 槽位清理放到变量解析之后
-                
                 # 检查转换条件
                 for transition in action_def.get("TRANSITIONS", []):
                     condition = transition.get("CONDITION")
@@ -173,13 +190,10 @@ class InterpreterCore:
                     if (condition == "API_SUCCESS" and api_response.get("status") == "success") or \
                        (condition == "API_FAILURE" and api_response.get("status") == "failure"):
                         
-                        # 1. 显示最终 Prompt (此时槽位变量可以被解析)
-                        # V2.2 修正 Bug 1: 必须先显示跳转到的目标状态的 Prompt
                         target_def = self.flow_model['STATES'].get(target_state, {})
                         self.context.current_state = target_state # 先修改状态
                         self._display_prompt(target_def.get("ENTRY_PROMPT"))
                         
-                        # 2. 清理槽位
                         self.context.slots_filled = {}
                         self.context.api_result = {}
 
@@ -189,7 +203,6 @@ class InterpreterCore:
             self._display_prompt(state_def.get("ENTRY_PROMPT"))
 
         else:
-            # 槽位未满足，执行询问动作
             missing_prompt = state_def.get("ACTION_MISSING_SLOT", {}).get("PROMPT")
             self._display_prompt(missing_prompt)
             
@@ -200,26 +213,22 @@ class InterpreterCore:
         final_prompt = self._resolve_prompt(prompt)
         print(f"\n🤖 机器人: {final_prompt}")
 
-# --- 主运行循环 (模拟命令行界面) ---
 def run_cli_bot(interpreter: InterpreterCore):
-    # V2.2 修正 Bug 1: 简化启动逻辑
     
     # 1. 打印 WELCOME 提示
     interpreter._display_prompt(interpreter._get_current_state_def().get("ENTRY_PROMPT"))
     
     # 2. 强制执行 WELCOME -> MAIN_MENU 的跳转
-    # WELCOME 状态的 ACTION_FULFILLED 只有一个 ALWAYS 跳转
     welcome_def = interpreter._get_current_state_def()
     if welcome_def.get('ACTION_FULFILLED'):
         # 强制执行 WELCOME 状态的动作 (即跳转到 MAIN_MENU)
         action_def = welcome_def['ACTION_FULFILLED']
-        transition = action_def['TRANSITIONS'][0] # 假设 WELCOME 只有 ALWAYS 跳转
+        transition = action_def['TRANSITIONS'][0] 
         
         target_state = transition['GOTO']
         interpreter.context.current_state = target_state
         target_def = interpreter._get_current_state_def()
         
-        # 打印 MAIN_MENU 提示
         interpreter._display_prompt(target_def.get("ENTRY_PROMPT"))
         
     while interpreter.context.session_active:
@@ -233,8 +242,8 @@ def run_cli_bot(interpreter: InterpreterCore):
         except Exception as e:
             print(f"\n[解释器运行错误]: {e}")
             if 'Fallback' in interpreter.flow_model['INTENT_MAP']:
-                 interpreter.context.current_state = interpreter.flow_model['INTENT_MAP']['Fallback']
-                 interpreter._display_prompt(interpreter._get_current_state_def().get("ENTRY_PROMPT"))
+                interpreter.context.current_state = interpreter.flow_model['INTENT_MAP']['Fallback']
+                interpreter._display_prompt(interpreter._get_current_state_def().get("ENTRY_PROMPT"))
 
 if __name__ == "__main__":
     print("--- 智能客服机器人解释器 V2.3 启动 ---")
