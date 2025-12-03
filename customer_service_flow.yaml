@@ -98,9 +98,9 @@ STATES:
           
   # --- 4. 注销账户流程 ---
   ACCOUNT_DEACTIVATE_START:
-    REQUIRED_SLOTS: ["account_id"]
+    REQUIRED_SLOTS: ["account_id", "old_password"]
     ACTION_MISSING_SLOT:
-      PROMPT: "好的，请提供您要注销的账户ID。"
+      PROMPT: "为了安全，请提供您的【账户ID】和【旧密码】以确认注销。"
     ACTION_FULFILLED:
       EXECUTE: "AccountAPI.deactivate"
       TRANSITIONS:

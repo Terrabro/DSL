@@ -40,7 +40,7 @@ class InterpreterCore:
         return self.flow_model['STATES'].get(self.context.current_state, {})
 
     def _execute_action(self, action_str: str, slots: dict) -> dict:
-        """ V2.2: 调用 DataManager 执行真实的查询/修改操作。 """
+        """ V2.3: 调用 DataManager 执行真实的查询/修改操作。 """
         print(f"\n[执行动作]: 调用 DataManager -> {action_str}")
         
         result_payload: Dict[str, Any] = {}
@@ -69,11 +69,14 @@ class InterpreterCore:
                 result_payload = {"status": "failure", "api_result": {"message": "账户或密码错误"}}
 
         elif action_str == "AccountAPI.deactivate":
-            success = self.data_manager.deactivate_account(slots.get('account_id'))
+            success = self.data_manager.deactivate_account(
+                slots.get('account_id'), 
+                slots.get('old_password')
+            )
             if success:
                 result_payload = {"status": "success"}
             else:
-                result_payload = {"status": "failure", "api_result": {"message": "账户不存在"}}
+                result_payload = {"status": "failure", "api_result": {"message": "账户不存在或密码错误"}}
 
         elif action_str == "ComplaintAPI.submit":
             ref_data = self.data_manager.submit_complaint(

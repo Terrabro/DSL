@@ -108,6 +108,7 @@ class DataManager:
         return False
         
     def deactivate_account(self, account_id: str, old_password: str) -> bool:
+        """模拟注销账户。"""
         found_and_matched = False
         
         for account in self._data['accounts']:
