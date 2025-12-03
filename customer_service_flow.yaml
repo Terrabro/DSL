@@ -1,0 +1,76 @@
+FLOW_ID: "Customer_Service_Bot_Flow"
+INITIAL_STATE: "WELCOME"
+
+# 意图到状态的全局映射 (主要用于意图切换)
+INTENT_MAP:
+  Greeting: WELCOME
+  QueryOrder: ORDER_QUERY_START
+  ModifyPassword: ACCOUNT_CHANGE_PASSWORD_START
+  DeactivateAccount: ACCOUNT_DEACTIVATE_START
+  LodgeComplaint: COMPLAINT_START
+  QueryProduct: PRODUCT_QUERY_START
+  Fallback: FALLBACK_TO_AGENT 
+
+STATES:
+  # --- 1. 欢迎和入口 ---
+  WELCOME:
+    ENTRY_PROMPT: "您好！我是智能客服。我可以帮您进行**账户操作**、**查询订单/商品**或**投诉**。请问您需要哪项服务？"
+    REQUIRED_SLOTS: []
+
+  # --- 2. 订单查询流程 ---
+  ORDER_QUERY_START:
+    REQUIRED_SLOTS: ["order_id"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请您提供订单号，例如：我的订单号是 20240901。"
+    ACTION_FULFILLED:
+      EXECUTE: "OrderAPI.query"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: ORDER_QUERY_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: ORDER_QUERY_FAILURE
+
+  ORDER_QUERY_SUCCESS:
+    ENTRY_PROMPT: "您的订单 ${order_id} 状态是【${api_result.status}】，预计到达日期是 ${api_result.eta}。"
+    REQUIRED_SLOTS: []
+
+  ORDER_QUERY_FAILURE:
+    ENTRY_PROMPT: "抱歉，我们未能查询到订单 ${order_id} 的信息，请您核对订单号是否正确。"
+    REQUIRED_SLOTS: []
+
+  # --- 3. 修改密码流程 ---
+  ACCOUNT_CHANGE_PASSWORD_START:
+    REQUIRED_SLOTS: ["account_id", "old_password", "new_password"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请您提供【账户ID】、【旧密码】和【新密码】以完成密码修改。"
+    ACTION_FULFILLED:
+      EXECUTE: "AccountAPI.changePassword"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: ACCOUNT_CHANGE_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: FALLBACK_TO_AGENT
+
+  ACCOUNT_CHANGE_SUCCESS:
+    ENTRY_PROMPT: "您的账户 ${account_id} 密码已成功修改。请注意保管新密码。"
+    REQUIRED_SLOTS: []
+
+  # --- 4. 投诉流程 ---
+  COMPLAINT_START:
+    REQUIRED_SLOTS: ["issue_description"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请您详细描述您要投诉的问题是什么？"
+    ACTION_FULFILLED:
+      EXECUTE: "ComplaintAPI.submit"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: COMPLAINT_SUCCESS
+
+  COMPLAINT_SUCCESS:
+    ENTRY_PROMPT: "我们已收到您的投诉，参考编号是 ${api_result.ref_id}。将尽快为您处理。"
+    REQUIRED_SLOTS: []
+
+  # --- 5. 兜底状态 ---
+  FALLBACK_TO_AGENT:
+    ENTRY_PROMPT: "抱歉，我暂时无法理解您的请求或处理此业务。正在为您转接人工客服，请稍候..."
+    REQUIRED_SLOTS: []
