@@ -1,5 +1,3 @@
-# data_manager.py
-
 import csv
 import os
 import time
@@ -8,6 +6,7 @@ from typing import Dict, Any, List, Optional
 ACCOUNTS_FILE = "accounts.csv"
 ORDERS_FILE = "orders.csv"
 COMPLAINTS_FILE = "complaints.csv"
+PRODUCTS_FILE = "products.csv"
 
 class DataManager:
     """
@@ -17,7 +16,8 @@ class DataManager:
         self._data: Dict[str, List[Dict[str, str]]] = {
             'accounts': self._load_csv(ACCOUNTS_FILE),
             'orders': self._load_csv(ORDERS_FILE),
-            'complaints': self._load_csv(COMPLAINTS_FILE)
+            'complaints': self._load_csv(COMPLAINTS_FILE),
+            'products': self._load_csv(PRODUCTS_FILE)
         }
         print("--- DataManager: CSV 数据加载完成 ---")
 
@@ -55,107 +55,65 @@ class DataManager:
 
     def query_order(self, order_id: str) -> Optional[Dict[str, str]]:
         """根据 order_id 查询订单信息。"""
-        # 查找匹配的订单
         for order in self._data['orders']:
             if order.get('order_id') == order_id:
-                # 返回订单状态和预计到达时间
                 return {
                     'status': order['status'],
                     'eta': order['eta'],
                     'product_name': order['product_name']
                 }
         return None # 未找到订单
-
-    def submit_complaint(self, account_id: str, issue_description: str) -> Dict[str, Any]:
-        """模拟提交投诉记录，并分配新的投诉编号。"""
-
-        new_ref_id = f"C{int(time.time())}"
         
-        # 构造新的投诉记录
+    def query_product(self, product_name: str) -> Optional[Dict[str, str]]:
+        """ V2.1 新增：根据 product_name 查询商品信息。"""
+        # 简单模糊匹配（将输入和记录都转小写再进行搜索）
+        search_name_lower = product_name.lower()
+        
+        for product in self._data['products']:
+            if search_name_lower in product.get('product_name', '').lower():
+                # 返回完整的商品信息
+                return product
+        return None # 未找到商品
+        
+    def submit_complaint(self, account_id: str, issue_description: str) -> Dict[str, Any]:
+        """模拟提交投诉记录。"""
+        new_ref_id = f"C{int(time.time())}"
         new_complaint = {
             'ref_id': new_ref_id,
-            'account_id': account_id if account_id else "Guest", # 如果账户ID为空，则使用“访客”
+            'account_id': account_id if account_id else "Guest",
             'issue_description': issue_description
         }
-        
-        # 将新记录添加到内存和文件中
         self._data['complaints'].append(new_complaint)
         self._save_csv(COMPLAINTS_FILE, self._data['complaints'])
-        
         return {'ref_id': new_ref_id}
 
     def change_password(self, account_id: str, old_password: str, new_password: str) -> bool:
         """模拟修改账户密码。"""
-        
         found = False
         success = False
-        
         for account in self._data['accounts']:
             if account.get('account_id') == account_id:
                 found = True
                 if account.get('password') == old_password:
-                    # 验证旧密码正确，执行修改
                     account['password'] = new_password
                     success = True
                     break
                 else:
-                    # 旧密码不匹配
                     success = False
                     break
-
         if success:
-            # 成功修改，写回文件 (模拟持久化)
             self._save_csv(ACCOUNTS_FILE, self._data['accounts'])
             return True
-        
-        # 如果账户不存在或密码不匹配，返回 False
         return False
         
     def deactivate_account(self, account_id: str) -> bool:
-        """模拟注销账户操作 (这里只是移除账户或标记状态)。"""
-        
+        """模拟注销账户操作。"""
         initial_count = len(self._data['accounts'])
-        
-        # 移除账户，并过滤掉匹配的 account_id
         self._data['accounts'] = [
             account for account in self._data['accounts'] 
             if account.get('account_id') != account_id
         ]
-        
-        # 检查是否有账户被移除
         if len(self._data['accounts']) < initial_count:
-            # 账户被移除，写回文件
             self._save_csv(ACCOUNTS_FILE, self._data['accounts'])
             return True
-        
-        # 未找到该账户
         return False
-
-if __name__ == '__main__':
-    # 简单的测试演示
-    dm = DataManager()
-    
-    # 测试查询
-    order_info = dm.query_order("O20240901")
-    print(f"\n[测试查询订单 O20240901]: {order_info}")
-    
-    # 测试投诉
-    complaint_ref = dm.submit_complaint(account_id="user1002", issue_description="物流太慢")
-    print(f"\n[测试提交投诉]: {complaint_ref}")
-    
-    # 测试修改密码 (失败：旧密码错误)
-    change_fail = dm.change_password(account_id="user1001", old_password="wrong", new_password="new_pass")
-    print(f"\n[测试修改密码-失败]: {change_fail}")
-    
-    # 测试修改密码 (成功)
-    change_success = dm.change_password(account_id="user1001", old_password="pa$$word1", new_password="new_pass_OK")
-    print(f"[测试修改密码-成功]: {change_success}")
-    
-    # 验证新密码是否写入
-    print(f"[验证新密码]: {dm._data['accounts'][0]}")
-    
-    # 测试注销账户
-    deactivate_success = dm.deactivate_account("test_acc")
-    print(f"\n[测试注销账户-成功]: {deactivate_success}")
-    # 验证账户是否移除
-    print(f"[验证账户数量]: 剩余 {len(dm._data['accounts'])} 个账户。")
