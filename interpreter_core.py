@@ -1,4 +1,4 @@
-# interpreter_core.py V2.0
+# interpreter_core.py V2.2
 
 import json
 import time
@@ -8,7 +8,7 @@ from typing import Dict, List, Any
 # --- 导入依赖 ---
 from nlu_engine import recognize_intent
 from dsl_parser import DSL_Parser
-from data_manager import DataManager # V2.0 新增: 导入数据管理器
+from data_manager import DataManager 
 
 # --- 全局配置 ---
 FLOW_FILE_PATH = "customer_service_flow.yaml"
@@ -30,7 +30,6 @@ class InterpreterCore:
         parser = DSL_Parser(flow_file)
         self.flow_model = parser.load_and_parse()
         
-        # V2.0 新增: 初始化数据管理器
         self.data_manager = DataManager()
         
         # 2. 初始化上下文
@@ -41,7 +40,7 @@ class InterpreterCore:
         return self.flow_model['STATES'].get(self.context.current_state, {})
 
     def _execute_action(self, action_str: str, slots: dict) -> dict:
-        """ V2.1: 调用 DataManager 执行真实的查询/修改操作。 """
+        """ V2.2: 调用 DataManager 执行真实的查询/修改操作。 """
         print(f"\n[执行动作]: 调用 DataManager -> {action_str}")
         
         result_payload: Dict[str, Any] = {}
@@ -53,7 +52,7 @@ class InterpreterCore:
             else:
                 result_payload = {"status": "failure", "api_result": {"message": "订单不存在"}}
 
-        elif action_str == "ProductAPI.query": # V2.1 新增：商品查询
+        elif action_str == "ProductAPI.query":
             product_info = self.data_manager.query_product(slots.get('product_name', ''))
             if product_info:
                 result_payload = {"status": "success", "api_result": product_info}
@@ -90,22 +89,22 @@ class InterpreterCore:
 
     def _all_slots_filled(self, state_def: dict) -> bool:
         required = set(state_def.get("REQUIRED_SLOTS", []))
-        # 检查是否所有必需的槽位都有值，并且值不是空字符串
         filled = {k for k, v in self.context.slots_filled.items() if v is not None and str(v).strip() != ''}
         return required.issubset(filled)
 
-    # (其余的辅助函数 _get_current_state_def, _resolve_prompt, _display_prompt, 
-    #  以及核心逻辑 process_turn, _check_slots_and_act 保持不变或进行微调)
-    # --------------------------------------------------------------------------------
-
     def _resolve_prompt(self, prompt_template: str) -> str:
-        """替换 PROMPT 模板中的变量。"""
+        """ V2.2: 替换 PROMPT 模板中的变量（槽位和API结果）。 """
         final_prompt = prompt_template
+        
+        # 1. 替换槽位变量 (${slot_name})
         for key, value in self.context.slots_filled.items():
             final_prompt = final_prompt.replace(f"${{{key}}}", str(value))
+            
+        # 2. 替换 API 结果变量 (${api_result.key})
         if 'api_result' in self.context.api_result and self.context.api_result['status'] == 'success':
              for key, value in self.context.api_result['api_result'].items():
                 final_prompt = final_prompt.replace(f"${{api_result.{key}}}", str(value))
+                
         return final_prompt
 
     def process_turn(self, user_input: str):
@@ -131,20 +130,17 @@ class InterpreterCore:
         intent = nlu_result['intent']
         if intent in self.flow_model['INTENT_MAP']:
             new_state = self.flow_model['INTENT_MAP'][intent]
-            # 特殊处理：如果NLU识别到意图，但当前在MAIN_MENU，则允许跳转
             if new_state != self.context.current_state or self.context.current_state == "MAIN_MENU":
                 print(f"[流程转换]: 意图切换 -> 从 {self.context.current_state} 切换到 {new_state}")
                 
-                # 清理槽位，准备进入新流程
+                # V2.2 修正：意图切换时立即清理旧流程的槽位
                 self.context.slots_filled = {}
                 self.context.api_result = {}
                 
                 self.context.current_state = new_state
                 current_def = self._get_current_state_def()
                 
-                # 切换后，立即检查是否需要执行动作或提问
                 if current_def.get("REQUIRED_SLOTS") or current_def.get("ACTION_FULFILLED"):
-                    # 如果新状态是需要收集参数的状态，则跳过 ENTRY_PROMPT，直接检查槽位
                     return self._check_slots_and_act(current_def)
                 else:
                     self._display_prompt(current_def.get("ENTRY_PROMPT"))
@@ -164,8 +160,7 @@ class InterpreterCore:
                 api_response = self._execute_action(action_type, self.context.slots_filled)
                 self.context.api_result = api_response
                 
-                # 清理槽位：动作执行完成后，当前流程的槽位清空
-                self.context.slots_filled = {}
+                # V2.2 修正 Bug 2: 槽位清理放到变量解析之后
                 
                 # 检查转换条件
                 for transition in action_def.get("TRANSITIONS", []):
@@ -174,8 +169,17 @@ class InterpreterCore:
                     
                     if (condition == "API_SUCCESS" and api_response.get("status") == "success") or \
                        (condition == "API_FAILURE" and api_response.get("status") == "failure"):
-                        self.context.current_state = target_state
-                        self._display_prompt(self._get_current_state_def().get("ENTRY_PROMPT"))
+                        
+                        # 1. 显示最终 Prompt (此时槽位变量可以被解析)
+                        # V2.2 修正 Bug 1: 必须先显示跳转到的目标状态的 Prompt
+                        target_def = self.flow_model['STATES'].get(target_state, {})
+                        self.context.current_state = target_state # 先修改状态
+                        self._display_prompt(target_def.get("ENTRY_PROMPT"))
+                        
+                        # 2. 清理槽位
+                        self.context.slots_filled = {}
+                        self.context.api_result = {}
+
                         return
             
             # 如果没有 EXECUTE，输出 ENTRY_PROMPT
@@ -186,10 +190,6 @@ class InterpreterCore:
             missing_prompt = state_def.get("ACTION_MISSING_SLOT", {}).get("PROMPT")
             self._display_prompt(missing_prompt)
             
-    # --------------------------------------------------------------------------------
-    # (其余的 _display_prompt, run_cli_bot 和 __main__ 块保持不变)
-    # --------------------------------------------------------------------------------
-
     def _display_prompt(self, prompt: str):
         if prompt == "END_SESSION":
             self.context.session_active = False
@@ -199,12 +199,26 @@ class InterpreterCore:
 
 # --- 主运行循环 (模拟命令行界面) ---
 def run_cli_bot(interpreter: InterpreterCore):
+    # V2.2 修正 Bug 1: 简化启动逻辑
+    
+    # 1. 打印 WELCOME 提示
     interpreter._display_prompt(interpreter._get_current_state_def().get("ENTRY_PROMPT"))
     
-    # 初始状态 WELCOME 执行后，自动跳转到 MAIN_MENU
-    if interpreter.context.current_state == "WELCOME":
-        interpreter._check_slots_and_act(interpreter._get_current_state_def())
-
+    # 2. 强制执行 WELCOME -> MAIN_MENU 的跳转
+    # WELCOME 状态的 ACTION_FULFILLED 只有一个 ALWAYS 跳转
+    welcome_def = interpreter._get_current_state_def()
+    if welcome_def.get('ACTION_FULFILLED'):
+        # 强制执行 WELCOME 状态的动作 (即跳转到 MAIN_MENU)
+        action_def = welcome_def['ACTION_FULFILLED']
+        transition = action_def['TRANSITIONS'][0] # 假设 WELCOME 只有 ALWAYS 跳转
+        
+        target_state = transition['GOTO']
+        interpreter.context.current_state = target_state
+        target_def = interpreter._get_current_state_def()
+        
+        # 打印 MAIN_MENU 提示
+        interpreter._display_prompt(target_def.get("ENTRY_PROMPT"))
+        
     while interpreter.context.session_active:
         user_input = input("\n👤 用户: ")
         if user_input.lower() in ["退出", "exit", "bye"]:
@@ -220,9 +234,8 @@ def run_cli_bot(interpreter: InterpreterCore):
                  interpreter._display_prompt(interpreter._get_current_state_def().get("ENTRY_PROMPT"))
 
 if __name__ == "__main__":
-    print("--- 智能客服机器人解释器 V2.0 启动 ---")
+    print("--- 智能客服机器人解释器 V2.2 启动 ---")
     try:
-        # V2.0 需要确保 data_manager.py 及其依赖的 CSV 文件都存在
         interpreter = InterpreterCore(FLOW_FILE_PATH, NLU_MODEL)
         run_cli_bot(interpreter)
     except Exception as e:

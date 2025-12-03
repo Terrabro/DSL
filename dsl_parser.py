@@ -3,6 +3,9 @@ import yaml
 import os
 
 class DSL_Parser:
+    """
+    负责读取 DSL (YAML) 文件并将其转换为内存中的流程模型。
+    """
     def __init__(self, file_path: str):
         self.file_path = file_path
         self.flow_model = None
@@ -19,6 +22,7 @@ class DSL_Parser:
         except yaml.YAMLError as e:
             raise ValueError(f"DSL 解析错误 (YAML 格式不正确): {e}")
             
+        # 简化验证
         required_keys = ["FLOW_ID", "INITIAL_STATE", "INTENT_MAP", "STATES"]
         if not all(key in self.flow_model for key in required_keys):
             missing = [key for key in required_keys if key not in self.flow_model]

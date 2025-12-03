@@ -53,28 +53,29 @@ class DataManager:
         except Exception as e:
             print(f"错误: 写入 {file_path} 失败: {e}")
 
+    # --- DSL 核心动作函数 ---
+
     def query_order(self, order_id: str) -> Optional[Dict[str, str]]:
         """根据 order_id 查询订单信息。"""
         for order in self._data['orders']:
-            if order.get('order_id') == order_id:
+            # 兼容性匹配：移除订单号中的空格或尝试进行简单匹配
+            if order.get('order_id', '').strip() == order_id.strip():
                 return {
                     'status': order['status'],
                     'eta': order['eta'],
                     'product_name': order['product_name']
                 }
-        return None # 未找到订单
-        
+        return None
+
     def query_product(self, product_name: str) -> Optional[Dict[str, str]]:
-        """ V2.1 新增：根据 product_name 查询商品信息。"""
-        # 简单模糊匹配（将输入和记录都转小写再进行搜索）
+        """根据 product_name 查询商品信息。"""
         search_name_lower = product_name.lower()
         
         for product in self._data['products']:
             if search_name_lower in product.get('product_name', '').lower():
-                # 返回完整的商品信息
                 return product
-        return None # 未找到商品
-        
+        return None
+
     def submit_complaint(self, account_id: str, issue_description: str) -> Dict[str, Any]:
         """模拟提交投诉记录。"""
         new_ref_id = f"C{int(time.time())}"
@@ -106,14 +107,22 @@ class DataManager:
             return True
         return False
         
-    def deactivate_account(self, account_id: str) -> bool:
-        """模拟注销账户操作。"""
-        initial_count = len(self._data['accounts'])
-        self._data['accounts'] = [
-            account for account in self._data['accounts'] 
-            if account.get('account_id') != account_id
-        ]
-        if len(self._data['accounts']) < initial_count:
+    def deactivate_account(self, account_id: str, old_password: str) -> bool:
+        found_and_matched = False
+        
+        for account in self._data['accounts']:
+            if account.get('account_id') == account_id:
+                if account.get('password') == old_password:
+                    found_and_matched = True
+                break
+
+        if found_and_matched:
+            # 移除账户
+            self._data['accounts'] = [
+                account for account in self._data['accounts'] 
+                if account.get('account_id') != account_id
+            ]
             self._save_csv(ACCOUNTS_FILE, self._data['accounts'])
             return True
+        
         return False
