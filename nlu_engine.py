@@ -1,9 +1,9 @@
 import os
 import json
 from openai import OpenAI
-from typing import Dict, List
+from typing import Dict, List, Any
 
-# --- 配置信息 (用于 NLU 转换的预定义信息) ---
+# --- 用于 NLU 转换的预定义信息 ---
 SYSTEM_INSTRUCTIONS = """
 你是一个专业的自然语言理解(NLU)引擎。你的唯一职责是深度理解用户的**语义意图**，并以严格的JSON格式输出意图和实体。
 请勿输出任何解释、寒暄或额外的文本，只返回一个有效的JSON对象。
@@ -22,33 +22,36 @@ SYSTEM_INSTRUCTIONS = """
     请自己联系上下文，给出最好的判断。比如在修改密码时上一次输入了账号，第二次输入了密码，自行联系上下文补齐账号。
 
 **1. 账户操作 (修改/注销)**
-   - 对应意图：ModifyPassword, DeactivateAccount
-   - 语义示例：用户说“账号操作”、“我想换个密码”、“我想把账户关掉”。
+    - 对应意图：ModifyPassword, DeactivateAccount
+    - 语义示例：用户说“账号操作”、“我想换个密码”、“我想把账户关掉”。
 
 **2. 订单查询**
-   - 对应意图：QueryOrder
-   - 语义示例：用户说“我要查包裹”、“我的快递到哪了”、“订单号是多少”。
-   - **特殊规则：** 如果用户提供的订单号是纯数字，请在提取的 `order_id` 前加上大写字母 "O"，以进行标准化（例如：输入“20240911”，提取“O20240911”）。
-   
+    - 对应意图：QueryOrder
+    - 语义示例：用户说“我要查包裹”、“我的快递到哪了”、“订单号是多少”。
+    - **特殊规则：** 如果用户提供的订单号是纯数字，请在提取的 `order_id` 前加上大写字母 "O"，以进行标准化（例如：输入“20240911”，提取“O20240911”）。
+    
 **3. 商品信息查询**
-   - 对应意图：QueryProduct
-   - 语义示例：用户说“商品问题”、“想查一下手机的价格”、“有没有新的智能手表”。
-   
+    - 对应意图：QueryProduct
+    - 语义示例：用户说“商品问题”、“想查一下手机的价格”、“有没有新的智能手表”。
+    
 **4. 提交投诉**
-   - 对应意图：LodgeComplaint
-   - 语义示例：用户说“我有投诉”、“服务态度差”、“对你们很不满意”。
+    - 对应意图：LodgeComplaint
+    - 语义示例：用户说“我有投诉”、“服务态度差”、“对你们很不满意”。
 
 **5. 问候/寒暄**
-   - 对应意图：Greeting
-   - 语义示例：用户说“你好”、“谢谢”。
+    - 对应意图：Greeting
+    - 语义示例：用户说“你好”、“谢谢”。
 
 **6. 菜单数字选择**
-   - 如果用户输入数字 **1**, 意图为 Select_1 (修改密码)
-   - 如果用户输入数字 **2**, 意图为 Select_2 (注销账户)
-   - 如果用户输入数字 **3**, 意图为 Select_3 (订单查询)
-   - 如果用户输入数字 **4**, 意图为 Select_4 (商品查询)
-   - 如果用户输入数字 **5**, 意图为 Select_5 (提交投诉)
+    - 如果用户输入数字 **1**, 意图为 Select_1 (修改密码)
+    - 如果用户输入数字 **2**, 意图为 Select_2 (注销账户)
+    - 如果用户输入数字 **3**, 意图为 Select_3 (订单查询)
+    - 如果用户输入数字 **4**, 意图为 Select_4 (商品查询)
+    - 如果用户输入数字 **5**, 意图为 Select_5 (提交投诉)
 """
+
+# 定义所有可用的领域
+DOMAINS = ["Customer_Service", "Smart_Home", "Finance_Advisor"]
 
 # 初始化OpenAI客户端，从环境变量中读取您的API Key
 client = OpenAI(
@@ -56,21 +59,62 @@ client = OpenAI(
     api_key=os.environ.get("ARK_API_KEY"),
 )
 
+def recognize_domain(user_input: str) -> str:
+    client_instance = client
+    if client_instance is None:
+        return "Customer_Service"
+
+    domain_list_str = ", ".join(DOMAINS)
+    
+    system_prompt = f"""
+    你是一个领域分类器。你需要根据用户输入判断它属于以下哪个领域：{domain_list_str}。
+    请直接输出你认为最匹配的领域名称，不要添加任何解释、标点符号或其他文字。
+    如果无法判断，请输出 'Customer_Service' 作为默认领域。
+    """
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_input}
+    ]
+
+    try:
+        resp = client_instance.chat.completions.create(
+            model="doubao-seed-1-6-251015",
+            messages=messages,
+            temperature=0.0,
+        )
+        domain = resp.choices[0].message.content.strip()
+        
+        if domain in DOMAINS:
+            return domain
+        else:
+            return "Customer_Service"
+
+    except Exception as e:
+        print(f"[Domain 错误] LLM调用失败: {e}")
+        return "Customer_Service"
+
 def recognize_intent(
     model: str, 
     user_input: str, 
+    intent_map: Dict[str, str],
     current_state: str, 
     required_slots: List[str]
 ) -> Dict:
-    """执行最小化的上下文驱动 NLU 识别功能。"""
     if not os.environ.get("ARK_API_KEY"):
-        print("[NLU 错误] 环境变量 ARK_API_KEY 未设置！使用 Fallback。")
         return {"intent": "Fallback", "slots": {}}
         
+    client_instance = client
+    if client_instance is None:
+        return {"intent": "Fallback", "slots": {}}
+        
+    available_intents = list(intent_map.keys())
+    
     context_prompt = f"""
     【当前对话上下文】
     - 当前状态 (Current State)：{current_state}
     - 当前所需实体 (Required Slots)：{required_slots} 
+    - 当前可用意图列表 (Available Intents)：{available_intents} 
 
     【用户输入】
     用户输入: {user_input}
@@ -82,10 +126,10 @@ def recognize_intent(
     ]
     
     try:
-        resp = client.chat.completions.create(
+        resp = client_instance.chat.completions.create(
             model=model,
             messages=messages,
-            temperature=0.0 # 降低温度
+            temperature=0.0,
         )
         
         json_text = resp.choices[0].message.content.strip()
@@ -94,7 +138,13 @@ def recognize_intent(
         if json_text.startswith("```json"):
             json_text = json_text.strip("```json").strip("```").strip()
             
-        return json.loads(json_text)
+        nlu_result = json.loads(json_text)
+        
+        # 验证意图是否在当前 DSL 中可用
+        if nlu_result.get('intent') not in available_intents:
+            nlu_result['intent'] = "Fallback"
+            
+        return nlu_result
         
     except Exception as e:
         print(f"[NLU 错误] API 调用或 JSON 解析失败: {e}")
