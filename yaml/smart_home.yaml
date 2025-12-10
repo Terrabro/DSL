@@ -1,0 +1,168 @@
+FLOW_ID: "Smart_Home_Control_Flow"
+INITIAL_STATE: "WELCOME"
+
+# 意图到状态的全局映射
+INTENT_MAP:
+  Greeting: MAIN_MENU
+  TurnOn: DEVICE_CONTROL_ON_START
+  TurnOff: DEVICE_CONTROL_OFF_START
+  SetTemperature: THERMOSTAT_SET_START
+  QueryStatus: DEVICE_QUERY_STATUS_START
+  ActivateScene: SCENE_ACTIVATE_START
+  Fallback: FALLBACK_TO_AGENT 
+  
+  # 快速选择（针对特定设备或功能）
+  Select_1: THERMOSTAT_SET_START      # 调温度
+  Select_2: DEVICE_QUERY_STATUS_START # 查状态
+  Select_3: SCENE_ACTIVATE_START      # 启动场景
+
+STATES:
+  # --- 1. 欢迎和主菜单引导 ---
+  WELCOME:
+    ENTRY_PROMPT: "您好！我是您的智能管家。请问您想控制哪个设备或查询什么状态？"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+          
+  MAIN_MENU:
+    ENTRY_PROMPT: |
+      您可以尝试说出以下指令：
+      1. 设置温度 (例如：把空调调到25度)
+      2. 查询状态 (例如：客厅灯开了吗？)
+      3. 启动场景 (例如：激活电影模式)
+    REQUIRED_SLOTS: []
+
+  # --- 2. 设备开启流程 (TurnOn/TurnOff) ---
+  DEVICE_CONTROL_ON_START:
+    REQUIRED_SLOTS: ["device_name"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请告诉我您想打开哪个设备？"
+    ACTION_FULFILLED:
+      EXECUTE: "DeviceAPI.turnOn"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: DEVICE_CONTROL_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: DEVICE_CONTROL_FAILURE
+
+  DEVICE_CONTROL_OFF_START:
+    REQUIRED_SLOTS: ["device_name"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请告诉我您想关闭哪个设备？"
+    ACTION_FULFILLED:
+      EXECUTE: "DeviceAPI.turnOff"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: DEVICE_CONTROL_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: DEVICE_CONTROL_FAILURE
+
+  DEVICE_CONTROL_SUCCESS:
+    ENTRY_PROMPT: "已成功控制【${device_name}】完成操作。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  DEVICE_CONTROL_FAILURE:
+    ENTRY_PROMPT: "抱歉，无法控制【${device_name}】，请检查设备连接状态。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: FALLBACK_TO_AGENT
+
+  # --- 3. 恒温器设置流程 (SetTemperature) ---
+  THERMOSTAT_SET_START:
+    REQUIRED_SLOTS: ["device_name", "temperature"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请告诉我您想设置哪个设备（如空调/暖气），以及目标温度是多少？"
+    ACTION_FULFILLED:
+      EXECUTE: "DeviceAPI.setTemperature"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: THERMOSTAT_SET_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: THERMOSTAT_SET_FAILURE
+          
+  THERMOSTAT_SET_SUCCESS:
+    ENTRY_PROMPT: "已将【${device_name}】的温度成功设置为 ${temperature} 度。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  THERMOSTAT_SET_FAILURE:
+    ENTRY_PROMPT: "设置温度失败，请检查【${device_name}】是否支持此操作或网络连接。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  # --- 4. 设备状态查询流程 (QueryStatus) ---
+  DEVICE_QUERY_STATUS_START:
+    REQUIRED_SLOTS: ["device_name"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请问您想查询哪个设备的状态？"
+    ACTION_FULFILLED:
+      EXECUTE: "DeviceAPI.queryStatus"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: DEVICE_QUERY_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: DEVICE_QUERY_FAILURE
+          
+  DEVICE_QUERY_SUCCESS:
+    ENTRY_PROMPT: "【${device_name}】的当前状态是：【${api_result.status}】，详细信息：${api_result.detail}。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  DEVICE_QUERY_FAILURE:
+    ENTRY_PROMPT: "抱歉，无法获取【${device_name}】的状态信息，可能设备未连接。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  # --- 5. 场景激活流程 (ActivateScene) ---
+  SCENE_ACTIVATE_START:
+    REQUIRED_SLOTS: ["scene_name"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请告诉我要激活哪个场景，例如“电影模式”或“回家模式”？"
+    ACTION_FULFILLED:
+      EXECUTE: "SceneAPI.activateScene"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: SCENE_ACTIVATE_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: SCENE_ACTIVATE_FAILURE
+          
+  SCENE_ACTIVATE_SUCCESS:
+    ENTRY_PROMPT: "【${scene_name}】场景已成功激活。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  SCENE_ACTIVATE_FAILURE:
+    ENTRY_PROMPT: "激活【${scene_name}】场景失败，请检查场景配置或相关设备状态。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: FALLBACK_TO_AGENT
+
+  # --- 6. 兜底状态 ---
+  FALLBACK_TO_AGENT:
+    ENTRY_PROMPT: "抱歉，我暂时无法完成此智能控制请求。您可能需要手动操作，或检查网络连接。"
+    REQUIRED_SLOTS: []

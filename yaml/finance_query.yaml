@@ -1,0 +1,151 @@
+FLOW_ID: "Finance_Advisor_Bot_Flow"
+INITIAL_STATE: "WELCOME"
+
+# 意图到状态的全局映射
+INTENT_MAP:
+  Greeting: MAIN_MENU
+  QueryQuote: QUOTE_QUERY_START      # 查询股票实时行情
+  QueryBalance: ACCOUNT_BALANCE_START # 查询账户余额
+  ExecuteTrade: TRADE_EXECUTE_START   # 执行交易 (买入/卖出)
+  RiskAssessment: RISK_ASSESSMENT_START # 风险评估
+  Fallback: FALLBACK_TO_AGENT 
+  
+  # 快速选择
+  Select_1: QUOTE_QUERY_START
+  Select_2: ACCOUNT_BALANCE_START
+  Select_3: TRADE_EXECUTE_START
+  Select_4: RISK_ASSESSMENT_START
+
+STATES:
+  # --- 1. 欢迎和主菜单引导 ---
+  WELCOME:
+    ENTRY_PROMPT: "您好！我是您的智能金融顾问。请问您需要查询股票行情，还是进行交易操作？"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+          
+  MAIN_MENU:
+    ENTRY_PROMPT: |
+      请选择您需要的服务序号：
+      1. 行情查询：查询股票价格 (例如：AAPL现在多少钱？)
+      2. 账户查询：查询资金余额
+      3. 交易操作：执行买入/卖出
+      4. 风险评估：开始投资风险问卷
+    REQUIRED_SLOTS: []
+
+  # --- 2. 股票行情查询流程 (QueryQuote) ---
+  QUOTE_QUERY_START:
+    REQUIRED_SLOTS: ["symbol"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请提供您想查询的股票代码或简称。"
+    ACTION_FULFILLED:
+      EXECUTE: "MarketAPI.queryQuote"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: QUOTE_QUERY_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: QUOTE_QUERY_FAILURE
+
+  QUOTE_QUERY_SUCCESS:
+    ENTRY_PROMPT: "【${symbol}】当前价格为 ${api_result.price}，涨跌幅为 ${api_result.change_percent}，成交量 ${api_result.volume}。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  QUOTE_QUERY_FAILURE:
+    ENTRY_PROMPT: "抱歉，无法查询到股票代码 ${symbol} 的实时行情，请检查输入是否正确。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  # --- 3. 账户余额查询流程 (QueryBalance) ---
+  ACCOUNT_BALANCE_START:
+    REQUIRED_SLOTS: ["account_id"]
+    ACTION_MISSING_SLOT:
+      PROMPT: "请提供您的账户ID以查询资金余额。"
+    ACTION_FULFILLED:
+      EXECUTE: "AccountAPI.queryBalance"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: ACCOUNT_BALANCE_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: ACCOUNT_BALANCE_FAILURE
+          
+  ACCOUNT_BALANCE_SUCCESS:
+    ENTRY_PROMPT: "账户 ${account_id} 的当前可用资金为 ${api_result.cash_balance}，总资产价值为 ${api_result.total_assets}。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  ACCOUNT_BALANCE_FAILURE:
+    ENTRY_PROMPT: "查询账户 ${account_id} 余额失败，请检查账户状态或网络连接。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: FALLBACK_TO_AGENT
+
+  # --- 4. 交易执行流程 (ExecuteTrade) ---
+  TRADE_EXECUTE_START:
+    REQUIRED_SLOTS: ["symbol", "quantity", "action"] # action: buy/sell
+    ACTION_MISSING_SLOT:
+      PROMPT: "请提供【股票代码】、【数量】和【交易类型（买入/卖出）】来执行交易。"
+    ACTION_FULFILLED:
+      EXECUTE: "TradeAPI.execute"
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: TRADE_EXECUTE_SUCCESS
+        - CONDITION: API_FAILURE
+          GOTO: TRADE_EXECUTE_FAILURE
+          
+  TRADE_EXECUTE_SUCCESS:
+    ENTRY_PROMPT: "已成功提交 ${action} ${quantity} 股 ${symbol} 的订单。订单号：${api_result.order_id}。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  TRADE_EXECUTE_FAILURE:
+    ENTRY_PROMPT: "交易执行失败，原因：${api_result.message}。可能是资金不足或数量错误。请转人工。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: FALLBACK_TO_AGENT
+
+  # --- 5. 风险评估流程 (RiskAssessment) ---
+  RISK_ASSESSMENT_START:
+    ENTRY_PROMPT: "您将开始进行投资风险评估。第一题：您能承受多大程度的资产损失？ (A. <10%, B. 10%-30%, C. >30%)"
+    REQUIRED_SLOTS: ["q1_answer"] # 只需要收集第一个问题的答案
+    ACTION_MISSING_SLOT:
+      PROMPT: "请选择 A, B, 或 C 回答第一题。"
+    ACTION_FULFILLED:
+      # 这里可以跳转到下一个问题状态，或者直接进行评估API
+      EXECUTE: "AssessmentAPI.calculateRisk" # 假设一个简单的 API，基于Q1即可评估
+      TRANSITIONS:
+        - CONDITION: API_SUCCESS
+          GOTO: RISK_ASSESSMENT_RESULT
+        - CONDITION: API_FAILURE
+          GOTO: FALLBACK_TO_AGENT
+          
+  RISK_ASSESSMENT_RESULT:
+    ENTRY_PROMPT: "根据您的回答，您的风险承受能力被评估为：【${api_result.level}】。建议您配置 ${api_result.stock_ratio} 的股票投资比例。"
+    REQUIRED_SLOTS: []
+    ACTION_FULFILLED:
+      TRANSITIONS:
+        - CONDITION: ALWAYS
+          GOTO: MAIN_MENU
+
+  # --- 6. 兜底状态 ---
+  FALLBACK_TO_AGENT:
+    ENTRY_PROMPT: "抱歉，我无法处理此金融业务或交易请求，正在为您转接人工交易员，请勿关闭页面。"
+    REQUIRED_SLOTS: []
