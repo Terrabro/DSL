@@ -9,9 +9,6 @@ COMPLAINTS_FILE = "./data/complaints.csv"
 PRODUCTS_FILE = "./data/products.csv"
 
 class DataManager:
-    """
-    负责加载、查询和模拟更新项目中的 CSV 数据。
-    """
     def __init__(self):
         self._data: Dict[str, List[Dict[str, str]]] = {
             'accounts': self._load_csv(ACCOUNTS_FILE),
@@ -39,7 +36,6 @@ class DataManager:
         return data
 
     def _save_csv(self, file_path: str, data: List[Dict[str, str]]):
-        """将数据写回 CSV 文件 (用于模拟持久化)。"""
         if not data:
             return
             
